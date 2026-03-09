@@ -1,0 +1,20 @@
+{
+  "name": "event-discovery",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build:web": "pnpm --filter web build",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

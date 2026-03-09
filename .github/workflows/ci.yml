@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ── Python / FastAPI ────────────────────────────────────────────────────────
+  api-lint:
+    name: API — Lint & Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run ruff check app tests
+      - run: uv run ruff format --check app tests
+      - run: uv run mypy app
+
+  api-test:
+    name: API — Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eventdb_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev
+      - run: uv run alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/eventdb_test
+      - run: uv run pytest --cov=app --cov-report=xml
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/eventdb_test
+          REDIS_URL: redis://localhost:6379/0
+      - uses: codecov/codecov-action@v4
+        with:
+          files: apps/api/coverage.xml
+
+  # ── Next.js / Frontend ──────────────────────────────────────────────────────
+  web-lint:
+    name: Web — Lint & Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+      - run: pnpm lint
+      - run: pnpm exec tsc --noEmit
+
+  web-build:
+    name: Web — Build
+    runs-on: ubuntu-latest
+    needs: web-lint
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        working-directory: .
+      - run: pnpm build
+        env:
+          NEXT_PUBLIC_MAPBOX_TOKEN: placeholder
+          NEXTAUTH_SECRET: placeholder
+          NEXTAUTH_URL: http://localhost:3000

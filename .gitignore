@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+packages/openapi/generated/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/*.tfvars
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Logs
+*.log
