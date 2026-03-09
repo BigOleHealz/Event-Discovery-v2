@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Text, func
+from sqlalchemy import DateTime, ForeignKey, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,7 +25,7 @@ class Invite(Base):
     status: Mapped[str] = mapped_column(Text, default="pending", nullable=False)
     twilio_sid: Mapped[str | None] = mapped_column(Text, nullable=True)
     deep_link: Mapped[str] = mapped_column(Text, nullable=False)
-    sent_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     event: Mapped["Event"] = relationship("Event", back_populates="invites")  # type: ignore[name-defined]  # noqa: F821
     sender: Mapped["User"] = relationship(  # type: ignore[name-defined]  # noqa: F821

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Index, Numeric, SmallInteger, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, SmallInteger, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,8 +28,8 @@ class Event(Base):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    start_at: Mapped[datetime] = mapped_column(nullable=False)
-    end_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     venue_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("venues.id"), nullable=True
     )
@@ -43,7 +43,7 @@ class Event(Base):
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Qdrant point ID — deterministic UUID5 from {source}:{external_id}
     embedding_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     canonical: Mapped["Event | None"] = relationship(
         "Event", remote_side="Event.id", foreign_keys=[canonical_id], back_populates="duplicates"

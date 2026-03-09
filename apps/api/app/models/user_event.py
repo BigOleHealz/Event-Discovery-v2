@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,7 +22,7 @@ class UserEvent(Base):
     )
     # 'view' | 'save' | 'rsvp' | 'invite_sent'
     action: Mapped[str] = mapped_column(Text, primary_key=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user: Mapped["User"] = relationship("User", back_populates="user_events")  # type: ignore[name-defined]  # noqa: F821
     event: Mapped["Event"] = relationship("Event", back_populates="user_events")  # type: ignore[name-defined]  # noqa: F821

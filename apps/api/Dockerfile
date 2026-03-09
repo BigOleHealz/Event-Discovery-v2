@@ -3,13 +3,14 @@ FROM python:3.12-slim
 # Copy uv binary from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-ENV UV_SYSTEM_PYTHON=1
-
 WORKDIR /app
 
-# Install deps into system Python — no venv needed in container
+# Install deps first (better layer caching — only re-runs on lockfile change)
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --no-dev --frozen
+
+# Put the venv on PATH so uvicorn and other scripts are found
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY app/ ./app/
 COPY migrations/ ./migrations/

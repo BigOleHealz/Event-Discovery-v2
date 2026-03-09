@@ -20,11 +20,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# PostGIS ships with its own schemas (tiger, tiger_data, topology) plus the
-# spatial_ref_sys table in public.  Exclude them so autogenerate never tries
-# to drop or recreate PostGIS internals.
-_EXCLUDED_SCHEMAS = {"tiger", "tiger_data", "topology"}
-_EXCLUDED_TABLES = {"spatial_ref_sys"}
+# Whitelist: only manage tables we define in our models.
+# This prevents Alembic from ever touching PostGIS / tiger geocoder / topology
+# tables that live in the public schema alongside our tables.
+_OUR_TABLES: frozenset[str] = frozenset(target_metadata.tables.keys())
 
 
 def include_object(
@@ -34,12 +33,15 @@ def include_object(
     reflected: bool,
     compare_to: object,  # type: ignore[type-arg]
 ) -> bool:
+    """Return True only for objects that belong to our application schema."""
     if type_ == "table":
-        schema = getattr(obj, "schema", None)
-        if schema in _EXCLUDED_SCHEMAS:
-            return False
-        if name in _EXCLUDED_TABLES:
-            return False
+        # Only manage tables we explicitly defined in models
+        return name in _OUR_TABLES
+    if type_ == "index":
+        # Only manage indexes on our tables
+        table = getattr(obj, "table", None)
+        table_name = getattr(table, "name", None) if table is not None else None
+        return table_name in _OUR_TABLES
     return True
 
 

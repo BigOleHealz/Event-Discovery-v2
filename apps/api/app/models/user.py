@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,7 +22,7 @@ class User(Base):
     oauth_sub: Mapped[str] = mapped_column(Text, nullable=False)
     # Encrypted Spotify token — stored as JSONB, never exposed in API responses directly
     spotify_token: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     invites_sent: Mapped[list["Invite"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Invite", back_populates="sender", foreign_keys="Invite.sender_id"
