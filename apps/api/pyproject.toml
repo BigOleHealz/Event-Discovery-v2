@@ -51,6 +51,11 @@ dev = [
     "mypy>=1.13.0",
 ]
 
+[dependency-groups]
+dev = [
+    "datamodel-code-generator",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

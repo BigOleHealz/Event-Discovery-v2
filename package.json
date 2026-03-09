@@ -8,7 +8,9 @@
     "build:web": "pnpm --filter web build",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "codegen:ts": "openapi-typescript packages/openapi/openapi.yaml -o packages/openapi/generated/typescript-client/schema.d.ts",
+    "codegen": "pnpm codegen:ts"
   },
   "devDependencies": {
     "prettier": "^3.3.3"

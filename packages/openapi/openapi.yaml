@@ -1,0 +1,805 @@
+openapi: 3.1.0
+info:
+  title: Event Discovery API
+  version: 0.1.0
+  description: >
+    Event Discovery — geo-aware event search, SMS invites, and personalised recommendations.
+
+servers:
+  - url: /api/v1
+    description: Current version
+
+# ─────────────────────────────────────────────────────────────
+# Security
+# ─────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  # ─────────────────────────────────────────────────────────────
+  # Reusable schemas
+  # ─────────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Primitives / helpers ──────────────────────────────────
+
+    UUID:
+      type: string
+      format: uuid
+      example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    ISODateTime:
+      type: string
+      format: date-time
+      example: "2026-03-15T19:00:00Z"
+
+    Cursor:
+      type: string
+      description: Opaque pagination cursor returned by list endpoints.
+      example: "eyJpZCI6IjNmYTg1ZjY0In0="
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          example: "Not found"
+
+    ValidationErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            required: [loc, msg, type]
+            properties:
+              loc:
+                type: array
+                items:
+                  type: string
+              msg:
+                type: string
+              type:
+                type: string
+
+    # ── Venue ─────────────────────────────────────────────────
+
+    VenueSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        name:
+          type: string
+          example: "The Fillmore"
+        address:
+          type: string
+          nullable: true
+          example: "1805 Geary Blvd, San Francisco, CA 94115"
+        lat:
+          type: number
+          format: double
+          nullable: true
+          example: 37.7842
+        lng:
+          type: number
+          format: double
+          nullable: true
+          example: -122.4329
+
+    Venue:
+      allOf:
+        - $ref: "#/components/schemas/VenueSummary"
+        - type: object
+          properties:
+            place_id:
+              type: string
+              nullable: true
+              description: Google Places ID used for venue deduplication.
+            created_at:
+              $ref: "#/components/schemas/ISODateTime"
+
+    # ── Category ──────────────────────────────────────────────
+
+    Category:
+      type: object
+      required: [slug, label]
+      properties:
+        slug:
+          type: string
+          example: "music"
+        label:
+          type: string
+          example: "Music"
+
+    # ── Event ─────────────────────────────────────────────────
+
+    EventSummary:
+      type: object
+      required: [id, title, start_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        title:
+          type: string
+          example: "SF Jazz Festival 2026"
+        description:
+          type: string
+          nullable: true
+        start_at:
+          $ref: "#/components/schemas/ISODateTime"
+        end_at:
+          $ref: "#/components/schemas/ISODateTime"
+          nullable: true
+        venue:
+          $ref: "#/components/schemas/VenueSummary"
+          nullable: true
+        category:
+          $ref: "#/components/schemas/Category"
+          nullable: true
+        price_min:
+          type: number
+          format: double
+          nullable: true
+          example: 0
+        price_max:
+          type: number
+          format: double
+          nullable: true
+          example: 25.00
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+        ticket_url:
+          type: string
+          format: uri
+          nullable: true
+        distance_km:
+          type: number
+          format: double
+          nullable: true
+          description: Distance from query origin, populated by geo endpoints.
+          example: 3.2
+
+    Event:
+      allOf:
+        - $ref: "#/components/schemas/EventSummary"
+        - type: object
+          properties:
+            source:
+              type: string
+              nullable: true
+              example: "eventbrite"
+            external_id:
+              type: string
+              nullable: true
+            embedding_id:
+              type: string
+              nullable: true
+            created_at:
+              $ref: "#/components/schemas/ISODateTime"
+
+    EventCreate:
+      type: object
+      required: [title, start_at]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        start_at:
+          $ref: "#/components/schemas/ISODateTime"
+        end_at:
+          $ref: "#/components/schemas/ISODateTime"
+          nullable: true
+        venue_id:
+          $ref: "#/components/schemas/UUID"
+          nullable: true
+        category_slug:
+          type: string
+          nullable: true
+        ticket_url:
+          type: string
+          format: uri
+          nullable: true
+        price_min:
+          type: number
+          format: double
+          nullable: true
+        price_max:
+          type: number
+          format: double
+          nullable: true
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        external_id:
+          type: string
+          nullable: true
+        raw_payload:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    EventListResponse:
+      type: object
+      required: [data, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventSummary"
+        cursor:
+          $ref: "#/components/schemas/Cursor"
+          nullable: true
+        total:
+          type: integer
+          example: 142
+
+    GeoJSONPoint:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          enum: [Point]
+        coordinates:
+          type: array
+          items:
+            type: number
+          minItems: 2
+          maxItems: 2
+          description: "[longitude, latitude]"
+
+    GeoJSONFeature:
+      type: object
+      required: [type, geometry, properties]
+      properties:
+        type:
+          type: string
+          enum: [Feature]
+        geometry:
+          $ref: "#/components/schemas/GeoJSONPoint"
+        properties:
+          type: object
+          additionalProperties: true
+
+    GeoJSONFeatureCollection:
+      type: object
+      required: [type, features]
+      properties:
+        type:
+          type: string
+          enum: [FeatureCollection]
+        features:
+          type: array
+          items:
+            $ref: "#/components/schemas/GeoJSONFeature"
+
+    NearbyEventListResponse:
+      allOf:
+        - $ref: "#/components/schemas/EventListResponse"
+        - type: object
+          properties:
+            geojson:
+              $ref: "#/components/schemas/GeoJSONFeatureCollection"
+
+    # ── User ──────────────────────────────────────────────────
+
+    User:
+      type: object
+      required: [id, email, oauth_provider, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+        oauth_provider:
+          type: string
+          enum: [google, apple]
+        created_at:
+          $ref: "#/components/schemas/ISODateTime"
+
+    UserUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          format: uri
+          nullable: true
+
+    # ── UserEvent ─────────────────────────────────────────────
+
+    UserEventAction:
+      type: string
+      enum: [view, save, rsvp, invite_sent]
+
+    UserEventCreate:
+      type: object
+      required: [event_id, action]
+      properties:
+        event_id:
+          $ref: "#/components/schemas/UUID"
+        action:
+          $ref: "#/components/schemas/UserEventAction"
+
+    UserEventResponse:
+      type: object
+      required: [user_id, event_id, action, created_at]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UUID"
+        event_id:
+          $ref: "#/components/schemas/UUID"
+        action:
+          $ref: "#/components/schemas/UserEventAction"
+        created_at:
+          $ref: "#/components/schemas/ISODateTime"
+
+    # ── Invite ────────────────────────────────────────────────
+
+    InviteStatus:
+      type: string
+      enum: [pending, delivered, opened]
+
+    InviteCreate:
+      type: object
+      required: [event_id, recipient_phone]
+      properties:
+        event_id:
+          $ref: "#/components/schemas/UUID"
+        recipient_phone:
+          type: string
+          pattern: '^\+[1-9]\d{7,14}$'
+          description: E.164 format phone number.
+          example: "+14155551234"
+
+    Invite:
+      type: object
+      required: [id, event_id, sender_id, recipient_phone, status, deep_link, sent_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/UUID"
+        event_id:
+          $ref: "#/components/schemas/UUID"
+        sender_id:
+          $ref: "#/components/schemas/UUID"
+        recipient_phone:
+          type: string
+        status:
+          $ref: "#/components/schemas/InviteStatus"
+        twilio_sid:
+          type: string
+          nullable: true
+        deep_link:
+          type: string
+          format: uri
+        sent_at:
+          $ref: "#/components/schemas/ISODateTime"
+        event:
+          $ref: "#/components/schemas/EventSummary"
+          nullable: true
+
+  # ─────────────────────────────────────────────────────────────
+  # Reusable parameters
+  # ─────────────────────────────────────────────────────────────
+  parameters:
+
+    EventId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UUID"
+
+    InviteId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/UUID"
+
+    Lat:
+      name: lat
+      in: query
+      required: true
+      schema:
+        type: number
+        format: double
+        minimum: -90
+        maximum: 90
+      example: 37.7749
+
+    Lng:
+      name: lng
+      in: query
+      required: true
+      schema:
+        type: number
+        format: double
+        minimum: -180
+        maximum: 180
+      example: -122.4194
+
+    RadiusKm:
+      name: radius_km
+      in: query
+      required: false
+      schema:
+        type: number
+        format: double
+        default: 25
+        minimum: 0.1
+        maximum: 500
+
+    StartAfter:
+      name: start_after
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+
+    EndBefore:
+      name: end_before
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+
+    CategorySlugs:
+      name: category_slugs
+      in: query
+      required: false
+      schema:
+        type: string
+        description: Comma-separated category slugs.
+        example: "music,tech"
+
+    SearchQuery:
+      name: q
+      in: query
+      required: false
+      schema:
+        type: string
+        description: Full-text search query.
+
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+    CursorParam:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/Cursor"
+
+  # ─────────────────────────────────────────────────────────────
+  # Reusable responses
+  # ─────────────────────────────────────────────────────────────
+  responses:
+
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Missing or invalid authentication token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: Authenticated but not permitted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnprocessableEntity:
+      description: Validation error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+# ─────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────
+paths:
+
+  # ── Events ────────────────────────────────────────────────
+
+  /events:
+    get:
+      operationId: listEvents
+      summary: List and search events
+      description: >
+        Returns a paginated list of canonical events. Supports geo, date,
+        category, and text filters. Requires at least one of lat+lng or q.
+      tags: [Events]
+      parameters:
+        - $ref: "#/components/parameters/Lat"
+        - $ref: "#/components/parameters/Lng"
+        - $ref: "#/components/parameters/RadiusKm"
+        - $ref: "#/components/parameters/StartAfter"
+        - $ref: "#/components/parameters/EndBefore"
+        - $ref: "#/components/parameters/CategorySlugs"
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/CursorParam"
+      responses:
+        "200":
+          description: Paginated event list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+    post:
+      operationId: createEvent
+      summary: Create an event (admin / ingestion only)
+      tags: [Events]
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventCreate"
+      responses:
+        "201":
+          description: Event created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /events/nearby:
+    get:
+      operationId: listEventsNearby
+      summary: Map-optimised events within a radius
+      description: >
+        Returns events near a lat/lng centre with an additional GeoJSON
+        FeatureCollection for direct Mapbox source injection.
+      tags: [Events]
+      parameters:
+        - $ref: "#/components/parameters/Lat"
+        - $ref: "#/components/parameters/Lng"
+        - $ref: "#/components/parameters/RadiusKm"
+        - $ref: "#/components/parameters/StartAfter"
+        - $ref: "#/components/parameters/EndBefore"
+        - $ref: "#/components/parameters/CategorySlugs"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/CursorParam"
+      responses:
+        "200":
+          description: Events near the given point with GeoJSON sidecar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NearbyEventListResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /events/{id}:
+    get:
+      operationId: getEvent
+      summary: Get a single event by ID
+      tags: [Events]
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: Event detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Users ─────────────────────────────────────────────────
+
+  /users/me:
+    get:
+      operationId: getMe
+      summary: Get the authenticated user's profile
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    patch:
+      operationId: updateMe
+      summary: Update the authenticated user's profile
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /users/me/saved:
+    get:
+      operationId: getSavedEvents
+      summary: List the authenticated user's saved events
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/CursorParam"
+      responses:
+        "200":
+          description: Saved events list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── User-Events ───────────────────────────────────────────
+
+  /user-events:
+    post:
+      operationId: logUserEvent
+      summary: Log a user action on an event (view / save / rsvp / invite_sent)
+      tags: [UserEvents]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserEventCreate"
+      responses:
+        "201":
+          description: Action logged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserEventResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  # ── Invites ───────────────────────────────────────────────
+
+  /invites:
+    post:
+      operationId: createInvite
+      summary: Send an SMS invite to an event
+      tags: [Invites]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteCreate"
+      responses:
+        "201":
+          description: Invite sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+          description: Rate limited — 10 invites per hour per user.
+
+  /invites/{id}:
+    get:
+      operationId: getInvite
+      summary: Get invite detail (used by deep-link landing page)
+      tags: [Invites]
+      parameters:
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite with pre-loaded event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invite"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+tags:
+  - name: Events
+    description: Event discovery and search
+  - name: Users
+    description: User profile and preferences
+  - name: UserEvents
+    description: User interaction signals (views, saves, RSVPs)
+  - name: Invites
+    description: SMS event invites via Twilio
