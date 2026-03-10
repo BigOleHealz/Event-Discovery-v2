@@ -32,11 +32,15 @@ event-discovery/
 ```
 
 **Checklist**
-- [ ] Init monorepo (pnpm workspaces or Turborepo)
-- [ ] `docker-compose.yml` with: `postgres:15-alpine` + PostGIS, Qdrant latest, Redis, Neo4j 5.x
-- [ ] `.env.example` with all required keys documented
-- [ ] Pre-commit hooks: Black + isort (Python), ESLint + Prettier (TS)
-- [ ] GitHub Actions skeleton: lint → test → deploy per workspace
+- [x] Init monorepo (pnpm workspaces)
+- [x] `docker-compose.yml` with: `postgis/postgis:16-3.4`, Qdrant latest, Redis 7, Neo4j 5.x — **postgres on port 5433** (not 5432, avoids Homebrew conflict). API service has `profiles: [full]` — start with `docker compose --profile full up`.
+- [x] `.env.example` with all required keys documented — `DATABASE_URL` uses port 5433
+- [x] Pre-commit hooks: **ruff** (replaces black+isort+flake8), ESLint + Prettier (TS)
+- [x] GitHub Actions skeleton: api-lint, api-test (postgres+redis services), web-lint, web-build — uses `astral-sh/setup-uv@v4`
+
+**Implementation notes:**
+- Python package manager is **`uv`** (not pip/venv). All commands go through `uv run`. Install: `make install` = `uv sync --extra dev`. Dockerfile uses `COPY --from=ghcr.io/astral-sh/uv:latest` with `.venv` on `PATH` (no `--system` flag).
+- Tiger geocoder tables ship inside `postgis/postgis` Docker image and pollute the public schema. Alembic `env.py` uses a **whitelist pattern** (`_OUR_TABLES = frozenset(target_metadata.tables.keys())`) in `include_object` to prevent autogenerate from touching PostGIS extension tables.
 
 ---
 
@@ -50,7 +54,8 @@ apps/api/app/models/
 ├── event.py
 ├── venue.py
 ├── category.py
-└── invite.py
+├── invite.py
+└── user_event.py
 ```
 
 ### 1.2 PostgreSQL Schema (PostGIS)
@@ -174,7 +179,7 @@ packages/openapi/
 | `GET` | `/events` | List/search events (geo, date, category filters) |
 | `GET` | `/events/{id}` | Single event detail |
 | `GET` | `/events/nearby` | Events within radius (lat, lng, km) |
-| `POST` | `/events` | Create event (admin/ingestion only) |
+| `POST` | `/events` | Create event (admin/ingestion only — user-created events planned for a later phase) |
 | `GET` | `/users/me` | Current user profile |
 | `PATCH` | `/users/me` | Update preferences |
 | `POST` | `/user-events` | Log user action (view/save/rsvp) |
@@ -215,12 +220,17 @@ cursor (pagination)
 ```
 
 ### Checklist
-- [ ] Write `packages/openapi/openapi.yaml` covering all Phase 1 endpoints with full request/response schemas
-- [ ] Run `openapi-generator` → TypeScript client into `packages/openapi/generated/typescript-client/`
-- [ ] Run `datamodel-code-generator` → Pydantic v2 models into `packages/openapi/generated/python-models/`
-- [ ] Write and apply `migrations/001_init.sql` via Alembic
-- [ ] Create Qdrant collection via `scripts/init_qdrant.py`
-- [ ] Set up MSW (Mock Service Worker) in Next.js dev build for immediate frontend mocking
+- [x] Write `packages/openapi/openapi.yaml` covering all Phase 1 endpoints with full request/response schemas
+- [x] Generate TypeScript types + client wrapper → `packages/openapi/generated/typescript-client/` — uses **`openapi-typescript`** (not `openapi-generator-cli`; no Java required). Run via `pnpm codegen` at repo root.
+- [x] Run `datamodel-code-generator` → Pydantic v2 models into `packages/openapi/generated/python-models/`
+- [x] Write and apply migrations via Alembic — migration `831b8bc4e8ff` applied, `alembic check` clean
+- [x] Create Qdrant collection via `scripts/init_qdrant.py`
+- [x] Set up MSW (Mock Service Worker) in Next.js dev build for immediate frontend mocking
+
+**Implementation notes (Phase 1.1):**
+- All `Mapped[datetime]` columns must use **`DateTime(timezone=True)`** explicitly — SQLAlchemy defaults to `DateTime()` (no tz) which mismatches the DB's `TIMESTAMPTZ`. Affects: `User.created_at`, `Event.start_at`, `Event.end_at`, `Event.created_at`, `Venue.created_at`, `Invite.sent_at`, `UserEvent.created_at`.
+- `Venue.location` must use **`spatial_index=True`** (the default) to match the GIST index created by the first migration.
+- Models implemented: `User`, `Event`, `Venue`, `Category`, `Invite`, `UserEvent` in `apps/api/app/models/`.
 
 ### Decisions / Tradeoffs
 - **GraphQL vs REST**: REST chosen for simplicity and V0.dev compatibility. Revisit in Phase 5 if graph traversal queries become expensive.
@@ -351,18 +361,20 @@ CREATE TABLE ingestion_runs (
 ```
 
 ### Checklist
-- [ ] `BaseIngester` ABC with `fetch_events(since: datetime) -> list[RawEvent]`
-- [ ] Eventbrite ingester (Eventbrite API v3, OAuth2 app token)
-- [ ] Meetup ingester (GraphQL API)
-- [ ] Facebook ingester (note: heavily rate-limited — see tradeoffs)
-- [ ] `normalizer.py` — map each source schema to `UnifiedEvent`
-- [ ] `embedder.py` — OpenAI `text-embedding-3-small`, batched (up to 2048 texts/call)
-- [ ] `dedup_service.py` — similarity search with date/geo pre-filter
-- [ ] Celery app with Redis broker + Celery Beat (every 6h per source)
-- [ ] `event_service.upsert()` — `ON CONFLICT (source, external_id) DO UPDATE`
-- [ ] Rate limiting: per-source request throttling with exponential backoff
-- [ ] `migrations/002_ingestion_tracking.sql`
-- [ ] Unit tests: normalizer + dedup threshold validation with fixture events
+- [x] `BaseIngester` ABC with `fetch_events(since: datetime) -> list[RawEvent]`
+- [x] Eventbrite ingester (Eventbrite API v3, Bearer token auth)
+- [x] Meetup ingester (GraphQL API via `/gql`)
+- [x] Facebook ingester — stub + `PredictHQIngester` skeleton (Plan B; see tradeoffs)
+- [x] `normalizer.py` — map each source schema to `UnifiedEvent`; category slug maps for Eventbrite + Meetup
+- [x] `embedder.py` — OpenAI `text-embedding-3-small`, batched (up to 2048 texts/call)
+- [x] `dedup_service.py` — similarity search with ±3-day pre-filter; `make_qdrant_id` UUID5; back-fill `event_id` payload
+- [x] Celery app with Redis broker + Beat schedule (every 6h per source, 15-min stagger)
+- [x] `event_service.upsert()` — `ON CONFLICT (source, external_id) DO UPDATE`; venue + category auto-create
+- [x] Rate limiting: per-source HTTP retries with exponential backoff (3 attempts, `_RETRY_BACKOFF_S`)
+- [x] Migration `52eb838ba3cd` — `ingestion_runs` table; `alembic check` clean
+- [x] Unit tests: 26 passing — normaliser (Eventbrite/Meetup/dispatcher/embed-text) + dedup (`make_qdrant_id`, `process()` happy/dedup/self-dedup paths)
+- [x] `workers/Dockerfile` — Celery worker image; `worker` + `beat` services added to `docker-compose.yml` under `full` profile
+- [x] `routers/admin.py` — `POST /api/v1/admin/ingest/trigger` + `GET /api/v1/admin/ingest/status`; `X-Admin-API-Key` header auth; `ADMIN_API_KEY` added to config + `.env`
 
 ### Decisions / Tradeoffs
 - **Celery vs SQS**: Celery + Redis for local dev parity. In prod, swap broker to SQS via `kombu` — same task code, different URL.

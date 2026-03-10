@@ -61,6 +61,9 @@ def setup_test_database() -> Generator[None, None, None]:
         engine = create_async_engine(TEST_DB_URL)
         async with engine.begin() as conn:
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+            # Drop all tables first so schema changes are always reflected
+            # without needing to manually migrate the test DB.
+            await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         await engine.dispose()
 

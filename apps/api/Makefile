@@ -1,4 +1,4 @@
-.PHONY: install dev lint format test migrate
+.PHONY: install dev lint format test test-cov migrate
 
 # After install, activate the venv:
 #   source .venv/bin/activate
@@ -18,7 +18,12 @@ format:
 	uv run ruff format app tests
 
 test:
+	DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/eventdb_test \
 	uv run pytest
+
+test-cov:
+	DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/eventdb_test \
+	uv run pytest --cov=app --cov-report=term-missing
 
 migrate:
 	uv run alembic upgrade head

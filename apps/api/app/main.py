@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.config import settings
+from app.routers import admin
 
 limiter = Limiter(key_func=get_remote_address, storage_uri=settings.redis_url)
 
@@ -39,6 +40,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    app.include_router(admin.router, prefix="/api/v1")
 
     # Routers registered in later phases
     # from app.routers import events, users, invites, auth

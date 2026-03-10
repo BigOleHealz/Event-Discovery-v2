@@ -37,6 +37,8 @@ class Event(Base):
         SmallInteger, ForeignKey("categories.id"), nullable=True
     )
     ticket_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # All ticketing/info links: [{"source": "...", "url": "...", "type": "..."}]
+    ticket_links: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     price_min: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     price_max: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)

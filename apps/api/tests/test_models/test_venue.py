@@ -62,10 +62,19 @@ async def test_venue_optional_fields(db_session: AsyncSession) -> None:
     assert venue.place_id is None
 
 
-async def test_venue_location_required(db_session: AsyncSession) -> None:
-    """location NOT NULL constraint should raise on flush."""
+async def test_venue_location_nullable(db_session: AsyncSession) -> None:
+    """location is nullable — venues without coordinates are allowed."""
     venue = Venue(name="No Location")  # type: ignore[call-arg]
     db_session.add(venue)
-    with pytest.raises(IntegrityError):
-        await db_session.flush()
-    await db_session.rollback()
+    await db_session.flush()
+    assert venue.location is None
+
+
+async def test_venue_phone_website_stored(db_session: AsyncSession) -> None:
+    """phone and website columns round-trip correctly."""
+    venue = _make_venue(phone="+1 512-555-0100", website="https://example.com")
+    db_session.add(venue)
+    await db_session.flush()
+
+    assert venue.phone == "+1 512-555-0100"
+    assert venue.website == "https://example.com"

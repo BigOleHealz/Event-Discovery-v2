@@ -50,3 +50,5 @@ celerybeat.pid
 
 # Logs
 *.log
+
+apps/api/migrations/

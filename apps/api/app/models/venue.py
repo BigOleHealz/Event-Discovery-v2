@@ -17,10 +17,14 @@ class Venue(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PostGIS geography point — used for ST_DWithin geo queries.
+    # Extract coordinates with ST_Y(location::geometry) / ST_X(location::geometry).
     location: Mapped[object] = mapped_column(
-        Geography(geometry_type="POINT", srid=4326, spatial_index=True), nullable=False
+        Geography(geometry_type="POINT", srid=4326, spatial_index=True), nullable=True
     )
     place_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    website: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     events: Mapped[list["Event"]] = relationship("Event", back_populates="venue")  # type: ignore[name-defined]  # noqa: F821
