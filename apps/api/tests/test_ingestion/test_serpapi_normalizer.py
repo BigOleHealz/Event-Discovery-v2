@@ -13,6 +13,7 @@ import pytest
 from app.ingestion.base import RawEvent
 from app.ingestion.normalizer import (
     _infer_category,
+    _infer_serpapi_year,
     _parse_serpapi_when,
     normalize_serpapi,
 )
@@ -89,9 +90,70 @@ _SERPAPI_NO_VENUE_RAW: dict = {
 # ---------------------------------------------------------------------------
 
 
+class TestInferSerpApiYear:
+    """Unit tests for the year-inference helper (time-frozen for determinism)."""
+
+    def _today(self, year: int, month: int, day: int) -> datetime:
+        return datetime(year, month, day, tzinfo=timezone.utc)
+
+    def _dt(self, year: int, month: int, day: int) -> datetime:
+        return datetime(year, month, day, tzinfo=timezone.utc)
+
+    def test_future_date_kept(self) -> None:
+        today = self._today(2026, 3, 10)
+        dt = self._dt(2026, 6, 15)  # 3 months in the future
+        assert _infer_serpapi_year(dt, today) == dt
+
+    def test_recent_past_skipped(self) -> None:
+        """Event 1 month ago → within 6-month window → return None (skip)."""
+        today = self._today(2026, 3, 10)
+        dt = self._dt(2026, 2, 5)  # ~33 days ago
+        assert _infer_serpapi_year(dt, today) is None
+
+    def test_boundary_exactly_6_months_ago_skipped(self) -> None:
+        """Exactly 183 days ago falls in the skip window."""
+        today = self._today(2026, 3, 10)
+        from datetime import timedelta
+        dt = today - timedelta(days=183)
+        assert _infer_serpapi_year(dt, today) is None
+
+    def test_old_date_bumped_to_next_year(self) -> None:
+        """Event > 6 months ago → bumped to next year."""
+        today = self._today(2026, 3, 10)
+        dt = self._dt(2025, 8, 1)  # ~7 months ago
+        result = _infer_serpapi_year(dt, today)
+        assert result is not None
+        assert result.year == 2026
+        assert result.month == 8
+        assert result.day == 1
+
+    def test_today_is_future(self) -> None:
+        """Same day as today counts as future (≥ today)."""
+        today = self._today(2026, 3, 10)
+        assert _infer_serpapi_year(today, today) == today
+
+    def test_feb29_handled_gracefully(self) -> None:
+        """Feb 29 bumped to a non-leap year becomes Feb 28."""
+        today = self._today(2027, 3, 10)
+        dt = datetime(2024, 2, 29, tzinfo=timezone.utc)  # >6 months ago
+        result = _infer_serpapi_year(dt, today)
+        assert result is not None
+        assert result.month == 2
+        assert result.day == 28
+        assert result.year == 2025
+
+
 class TestParseSerpApiWhen:
+    def test_future_date_returned(self) -> None:
+        """A clearly future date is returned without modification."""
+        # Dec is always in the future when run in early March
+        start, end = _parse_serpapi_when("Dec 7, 8:00 – 9:30 PM CST")
+        assert start is not None
+        assert start.month == 12
+        assert start.day == 7
+
     def test_same_day_with_dow_prefix(self) -> None:
-        """'Sun, Dec 7, 8:00 – 9:30 PM CST' → start and end on same day."""
+        """Day-of-week prefix is stripped; start and end land on same day."""
         start, end = _parse_serpapi_when("Sun, Dec 7, 8:00 – 9:30 PM CST")
         assert start is not None
         assert end is not None
@@ -112,7 +174,8 @@ class TestParseSerpApiWhen:
 
     def test_no_end_time(self) -> None:
         """When there is no dash separator, end should be None."""
-        start, end = _parse_serpapi_when("Mar 15, 6:00 PM")
+        # Use a future date so year inference doesn't skip it
+        start, end = _parse_serpapi_when("Dec 15, 6:00 PM")
         assert start is not None
         assert end is None
 
@@ -124,12 +187,19 @@ class TestParseSerpApiWhen:
     def test_returns_none_for_garbage(self) -> None:
         start, end = _parse_serpapi_when("not a date at all !!!!")
         # fuzzy parsing may still produce a result; we just check no crash
-        # (dateutil's fuzzy mode is permissive)
 
     def test_start_is_utc_aware(self) -> None:
         start, _ = _parse_serpapi_when("Dec 7, 8:00 PM CST")
         assert start is not None
         assert start.tzinfo is not None
+
+    def test_recently_past_date_returns_none(self) -> None:
+        """A date 1 month ago (within 6-month window) should return (None, None)."""
+        from datetime import timedelta
+        recent_past = datetime.now(tz=timezone.utc) - timedelta(days=30)
+        when = recent_past.strftime("%b %-d, 8:00 PM")
+        start, end = _parse_serpapi_when(when)
+        assert start is None
 
 
 # ---------------------------------------------------------------------------

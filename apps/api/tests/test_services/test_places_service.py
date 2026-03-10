@@ -313,7 +313,7 @@ class TestNormalizeSerpApiWithPlaces:
 
     _RAW: dict = {
         "title": "GRYFFIN with AVELLO",
-        "date": {"when": "Sat, 03 Jan, 21:00–23:00 GMT-6"},
+        "date": {"when": "Sat, 03 Dec, 21:00–23:00 GMT-6"},
         "address": ["The Concourse Project, 8509 Burleson Rd", "Austin, TX, United States"],
         "link": "https://www.statesman.com/event/123",
         "description": "Electronic music concert",

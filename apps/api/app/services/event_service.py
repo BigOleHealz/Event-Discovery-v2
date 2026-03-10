@@ -9,6 +9,7 @@ import uuid
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.normalizer import UnifiedEvent
@@ -139,22 +140,39 @@ async def upsert(db: AsyncSession, event: UnifiedEvent) -> tuple[str, bool]:
         "canonical_id": canonical_uuid,
     }
 
-    stmt = (
-        insert(Event)
-        .values(id=uuid.uuid4(), **values)
-        .on_conflict_do_update(
-            index_elements=["source", "external_id"],
-            # Only update mutable fields; never overwrite id/created_at
-            set_={
-                k: v
-                for k, v in values.items()
-                if k not in ("source", "external_id")
-            },
+    def _build_stmt(vals: dict) -> object:
+        return (
+            insert(Event)
+            .values(id=uuid.uuid4(), **vals)
+            .on_conflict_do_update(
+                index_elements=["source", "external_id"],
+                # Only update mutable fields; never overwrite id/created_at
+                set_={
+                    k: v
+                    for k, v in vals.items()
+                    if k not in ("source", "external_id")
+                },
+            )
+            .returning(Event.id)
         )
-        .returning(Event.id)
-    )
 
-    result = await db.execute(stmt)
+    try:
+        result = await db.execute(_build_stmt(values))
+    except IntegrityError as exc:
+        # canonical_id may point to a row that was deleted (e.g. after a DB
+        # cleanup).  Retry without it so the event is still persisted.
+        if "canonical_id" in str(exc.orig):
+            logger.warning(
+                "canonical_id FK violation for %s/%s — retrying without canonical_id",
+                event.source,
+                event.external_id,
+            )
+            await db.rollback()
+            values = {**values, "canonical_id": None}
+            result = await db.execute(_build_stmt(values))
+        else:
+            raise
+
     row = result.first()
     event_id = str(row[0]) if row else str(uuid.uuid4())
 

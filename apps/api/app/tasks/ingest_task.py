@@ -78,7 +78,14 @@ async def _run_ingestion_async(source: str, run_id: str | None = None) -> dict:
                 logger.exception("Normalise error for %s/%s", raw.source, raw.external_id)
                 continue
 
-            # Drop events outside the accepted date window
+            # normalize() returns None when the event should be skipped
+            # (e.g. a SerpApi event whose date has already passed)
+            if unified is None:
+                logger.debug("Skipping event %s/%s (normaliser returned None)", raw.source, raw.external_id)
+                stats["events_skipped"] += 1
+                continue
+
+            # Safety net: drop events outside the accepted date window
             if not (_year_floor <= unified.start_at < _year_ceil):
                 logger.debug(
                     "Skipping out-of-range event %s/%s (start_at=%s)",

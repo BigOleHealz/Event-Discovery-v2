@@ -6,7 +6,7 @@ source's raw payload to the shared `UnifiedEvent` schema.  The top-level
 `normalize` dispatcher routes by source name.
 """
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from dateutil import parser as _dtp
@@ -312,17 +312,52 @@ _MONTH_RE = re.compile(
 )
 
 
+_SIX_MONTHS_DAYS = 183
+
+
+def _infer_serpapi_year(dt: datetime, today: datetime) -> datetime | None:
+    """Apply year inference to a date parsed without an explicit year.
+
+    Rules (relative to *today*):
+
+    * **Future** — keep as-is (already the correct year).
+    * **Past ≤ 6 months ago** — return ``None`` to signal that this event
+      has already happened and should be skipped.
+    * **Past > 6 months ago** — bump the year by +1 (next annual occurrence).
+      For example, "Sep 1" parsed in March 2026 as Sep 1 2026 is future, so
+      it stays; but "Sep 1" parsed in October 2026 as Sep 1 2026 is 1 month
+      past and gets skipped, while "Sep 1" parsed in April 2027 as Sep 1 2026
+      is 7 months past and gets bumped to Sep 1 2027.
+    """
+    cutoff = today - timedelta(days=_SIX_MONTHS_DAYS)
+    if dt >= today:
+        return dt
+    if dt >= cutoff:
+        # Within the 6-month window → event has passed, skip it
+        return None
+    # More than 6 months ago → assume next year's occurrence
+    try:
+        return dt.replace(year=dt.year + 1)
+    except ValueError:
+        # Feb 29 in a non-leap year
+        return dt.replace(year=dt.year + 1, day=28)
+
+
 def _parse_serpapi_when(
     when: str | None,
 ) -> tuple[datetime | None, datetime | None]:
     """
     Parse SerpApi's ``date.when`` string into (start_dt, end_dt) UTC datetimes.
 
-    Handled formats:
-      "Dec 2, 9:00 PM – Dec 30, 10:30 PM CST"
-      "Sun, Dec 7, 8:00 – 9:30 PM CST"
-      "Fri, Oct 7, 7 – 8 AM"
-      "Nov 22, 4 PM – Dec 20, 8 PM CST"
+    Handled formats::
+
+        "Dec 2, 9:00 PM – Dec 30, 10:30 PM CST"
+        "Sun, Dec 7, 8:00 – 9:30 PM CST"
+        "Fri, Oct 7, 7 – 8 AM"
+        "Nov 22, 4 PM – Dec 20, 8 PM CST"
+
+    Returns ``(None, None)`` when the date string cannot be parsed **or** when
+    year inference determines the event has already passed (within 6 months).
     """
     if not when:
         return None, None
@@ -339,7 +374,8 @@ def _parse_serpapi_when(
     # Strip "Sun, " style day-of-week prefix from start only
     start_raw = _DOW_RE.sub("", start_raw).strip()
 
-    now = datetime.now()
+    now_naive = datetime.now()
+    now_utc = datetime.now(tz=timezone.utc)
 
     def _parse(s: str, default: datetime) -> datetime | None:
         if not s:
@@ -349,38 +385,55 @@ def _parse_serpapi_when(
         except (ValueError, OverflowError, TypeError):
             return None
 
-    # Parse start with current year; promote to next year if already past
-    default_this_year = datetime(now.year, now.month, now.day)
-    start_dt = _parse(start_raw, default_this_year)
+    # Parse start assuming current year, then apply year inference
+    start_dt = _parse(start_raw, datetime(now_naive.year, now_naive.month, now_naive.day))
     if start_dt is None:
         return None, None
-    if start_dt.date() < now.date() and str(now.year) not in start_raw:
-        next_year_dt = _parse(start_raw, datetime(now.year + 1, now.month, now.day))
-        if next_year_dt and next_year_dt.date() >= now.date():
-            start_dt = next_year_dt
 
-    # Localise to UTC (we drop the tz abbreviation; times are stored as-is)
+    # Make timezone-aware before inference so comparisons are consistent
     if start_dt.tzinfo is None:
         start_dt = start_dt.replace(tzinfo=timezone.utc)
+
+    start_dt = _infer_serpapi_year(start_dt, now_utc)
+    if start_dt is None:
+        # Event has already passed within the 6-month window — skip
+        return None, None
 
     end_dt = None
     if end_raw:
         if _MONTH_RE.search(end_raw):
-            # End string contains a month → full date
+            # End string contains a month → full date, inherit start's year
             end_dt = _parse(end_raw, datetime(start_dt.year, start_dt.month, start_dt.day))
         else:
             # Time-only end → same calendar day as start
-            ref = start_dt.replace(tzinfo=None)
-            end_dt = _parse(end_raw, ref)
+            end_dt = _parse(end_raw, start_dt.replace(tzinfo=None))
 
-        if end_dt is not None and end_dt.tzinfo is None:
-            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        if end_dt is not None:
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            # If end landed before start (e.g. year rolled), bump end year too
+            if end_dt < start_dt:
+                try:
+                    end_dt = end_dt.replace(year=end_dt.year + 1)
+                except ValueError:
+                    end_dt = end_dt.replace(year=end_dt.year + 1, day=28)
 
     return start_dt, end_dt
 
 
-def normalize_serpapi(raw: RawEvent) -> UnifiedEvent:
+def normalize_serpapi(raw: RawEvent) -> UnifiedEvent | None:
+    """Normalise a SerpApi raw event.
+
+    Returns ``None`` when the event's date indicates it has already passed
+    (within the 6-month look-back window), signalling to the caller to skip it.
+    """
     d = raw.raw_data
+
+    # Dates — checked first; bail early if the event should be skipped
+    date_info = d.get("date") or {}
+    start_dt, end_dt = _parse_serpapi_when(date_info.get("when"))
+    if start_dt is None:
+        return None  # unparseable date or event already passed
 
     # Address array: [street+venue, "City, State"] or just ["City, State"]
     address_parts: list[str] = d.get("address") or []
@@ -396,14 +449,6 @@ def normalize_serpapi(raw: RawEvent) -> UnifiedEvent:
         venue_name = address_parts[0].split(",")[0].strip() or None
     else:
         venue_name = None
-
-    # Dates
-    date_info = d.get("date") or {}
-    start_dt, end_dt = _parse_serpapi_when(date_info.get("when"))
-    if start_dt is None:
-        start_dt = datetime.now(tz=timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
 
     # Collect all ticket/info links preserving source and type metadata
     ticket_links: list[dict[str, str]] | None = None
@@ -504,8 +549,12 @@ _NORMALIZERS = {
 }
 
 
-def normalize(raw: RawEvent) -> UnifiedEvent:
-    """Map a `RawEvent` from any source to a `UnifiedEvent`."""
+def normalize(raw: RawEvent) -> UnifiedEvent | None:
+    """Map a ``RawEvent`` from any source to a ``UnifiedEvent``.
+
+    Returns ``None`` when the normaliser decides the event should be skipped
+    (e.g. a SerpApi event whose date has already passed).
+    """
     fn = _NORMALIZERS.get(raw.source)
     if fn is None:
         raise ValueError(f"No normaliser registered for source: {raw.source!r}")
