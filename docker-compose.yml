@@ -68,6 +68,33 @@ services:
       timeout: 10s
       retries: 5
 
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: event-discovery-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override localhost URLs with Docker service names
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/eventdb
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - full
+
   api:
     build:
       context: ./apps/api

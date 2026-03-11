@@ -49,6 +49,12 @@ class TriggerResponse(BaseModel):
     queued_at: datetime
 
 
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    result: dict | str | None
+
+
 class RunSummary(BaseModel):
     source: str
     started_at: datetime | None
@@ -90,6 +96,31 @@ async def trigger_ingestion(
 
 
 @router.get(
+    "/ingest/task/{task_id}",
+    response_model=TaskStatusResponse,
+    summary="Poll the result of a specific ingestion task",
+)
+async def task_status(_: AdminAuth, task_id: str) -> TaskStatusResponse:
+    from celery.result import AsyncResult
+
+    from app.tasks.celery_app import celery_app
+
+    result = AsyncResult(task_id, app=celery_app)
+    raw = None
+    if result.ready():
+        try:
+            raw = result.get(propagate=False)
+        except Exception as exc:
+            raw = str(exc)
+
+    return TaskStatusResponse(
+        task_id=task_id,
+        status=result.status,
+        result=raw,
+    )
+
+
+@router.get(
     "/ingest/status",
     response_model=StatusResponse,
     summary="Last ingestion run stats per source",
@@ -99,9 +130,7 @@ async def ingestion_status(
     db: AsyncSession = Depends(get_db),
 ) -> StatusResponse:
     runs: list[RunSummary] = []
-    
-    import pdb; pdb.set_trace()
-    
+
     for source in _KNOWN_SOURCES:
         stmt = (
             select(IngestionRun)

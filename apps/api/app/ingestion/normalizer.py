@@ -503,10 +503,12 @@ def normalize_serpapi(raw: RawEvent) -> UnifiedEvent | None:
         venue_phone: str | None = place_info.phone
         venue_website: str | None = place_info.website
     else:
-        # Fall back to Nominatim geocoding when Places API is unavailable
+        # Fall back to Nominatim geocoding when Places API is unavailable.
+        # Prefer the full venue_address (street + city) over city-only for
+        # venue-level precision; city is kept as last resort.
         from app.ingestion.geocoder import geocode  # noqa: PLC0415
 
-        geo_query = city or venue_address or d.get("_location") or ""
+        geo_query = venue_address or city or d.get("_location") or ""
         lat, lng = geocode(geo_query) if geo_query else (0.0, 0.0)
         venue_place_id = None
         venue_phone = None
