@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
     secret_key: str = "change-me-in-production"
+    app_base_url: str = "http://localhost:3000"  # set APP_BASE_URL in env; also used as CORS allow_origin
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/eventdb"
@@ -32,25 +33,11 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "neo4j"
 
-    # Auth
-    google_client_id: str = ""
-    google_client_secret: str = ""
-    apple_client_id: str = ""
-    apple_client_secret: str = ""
-    jwt_algorithm: str = "RS256"
-    access_token_expire_minutes: int = 60 * 24  # 24 hours
-
-    # Twilio
-    twilio_account_sid: str = ""
-    twilio_auth_token: str = ""
-    twilio_phone: str = ""
-
-    # Spotify
+    # Spotify (Phase 5)
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
 
-    # Maps
-    mapbox_token: str = ""
+    # Maps / Places
     google_places_api_key: str = ""
 
     # Ingestion sources
@@ -73,8 +60,7 @@ class Settings(BaseSettings):
     # Admin
     admin_api_key: str = "change-me-in-production"
 
-    # Rate limiting
-    rate_limit_invites_per_hour: int = 10
+    # Rate limiting (admin endpoints)
     rate_limit_ingest_per_minute: int = 5
 
 

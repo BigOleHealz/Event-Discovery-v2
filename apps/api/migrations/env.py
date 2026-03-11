@@ -11,6 +11,8 @@ from alembic import context
 from app.database import Base  # noqa: F401
 
 # Models imported here for autogenerate support — all Phase 1 entities
+# NOTE: oauth_tokens table is owned by Prisma (apps/web). Do NOT import OAuthToken here
+# or Alembic will try to manage the table and conflict with Prisma schema changes.
 from app.models import Category, Event, Invite, User, UserEvent, Venue  # noqa: F401
 
 config = context.config

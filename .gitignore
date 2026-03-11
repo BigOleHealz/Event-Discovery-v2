@@ -52,3 +52,4 @@ celerybeat.pid
 *.log
 
 apps/api/migrations/
+apps/api/app/ingestion/

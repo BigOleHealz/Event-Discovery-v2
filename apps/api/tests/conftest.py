@@ -60,10 +60,13 @@ def setup_test_database() -> Generator[None, None, None]:
 
         engine = create_async_engine(TEST_DB_URL)
         async with engine.begin() as conn:
+            # Schema-level reset handles FK ordering and any out-of-band tables
+            # (e.g. oauth_tokens) that may exist without being in Base.metadata.
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+            await conn.execute(text("GRANT ALL ON SCHEMA public TO postgres"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-            # Drop all tables first so schema changes are always reflected
-            # without needing to manually migrate the test DB.
-            await conn.run_sync(Base.metadata.drop_all)
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             await conn.run_sync(Base.metadata.create_all)
         await engine.dispose()
 
